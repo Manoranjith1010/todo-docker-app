@@ -1,109 +1,47 @@
-from flask import Flask, render_template, request, redirect
-import sqlite3
-from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for
+import os
 
 app = Flask(__name__)
+TASKS_FILE = os.path.join(os.path.dirname(__file__), "tasks.txt")
 
-DB_NAME = "notes.db"
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+def read_tasks():
+    if not os.path.exists(TASKS_FILE):
+        return []
+    with open(TASKS_FILE, "r", encoding="utf-8") as f:
+        tasks = [line.strip() for line in f.readlines() if line.strip()]
+    return tasks
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    """)
 
-    conn.commit()
-    conn.close()
+def write_tasks(tasks):
+    with open(TASKS_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(tasks))
 
-@app.route("/")
-def home():
-    search = request.args.get("search", "")
 
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+@app.route("/", methods=["GET"])
+def index():
+    tasks = read_tasks()
+    return render_template("index.html", tasks=tasks)
 
-    if search:
-        cursor.execute(
-            "SELECT * FROM notes WHERE title LIKE ? OR content LIKE ?",
-            (f"%{search}%", f"%{search}%")
-        )
-    else:
-        cursor.execute("SELECT * FROM notes ORDER BY id DESC")
-
-    notes = cursor.fetchall()
-
-    conn.close()
-
-    return render_template("index.html", notes=notes)
 
 @app.route("/add", methods=["POST"])
-def add():
-    title = request.form.get("title")
-    content = request.form.get("content")
+def add_task():
+    task = request.form.get("task", "").strip()
+    if task:
+        tasks = read_tasks()
+        tasks.append(task)
+        write_tasks(tasks)
+    return redirect(url_for("index"))
 
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
 
-    cursor.execute("""
-        INSERT INTO notes (title, content, created_at)
-        VALUES (?, ?, ?)
-    """, (
-        title,
-        content,
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ))
+@app.route("/delete/<int:index>", methods=["GET"])
+def delete_task(index):
+    tasks = read_tasks()
+    if 0 <= index < len(tasks):
+        tasks.pop(index)
+        write_tasks(tasks)
+    return redirect(url_for("index"))
 
-    conn.commit()
-    conn.close()
-
-    return redirect("/")
-
-@app.route("/delete/<int:id>")
-def delete(id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    cursor.execute("DELETE FROM notes WHERE id=?", (id,))
-
-    conn.commit()
-    conn.close()
-
-    return redirect("/")
-
-@app.route("/edit/<int:id>", methods=["GET", "POST"])
-def edit(id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    if request.method == "POST":
-        title = request.form.get("title")
-        content = request.form.get("content")
-
-        cursor.execute("""
-            UPDATE notes
-            SET title=?, content=?
-            WHERE id=?
-        """, (title, content, id))
-
-        conn.commit()
-        conn.close()
-
-        return redirect("/")
-
-    cursor.execute("SELECT * FROM notes WHERE id=?", (id,))
-    note = cursor.fetchone()
-
-    conn.close()
-
-    return render_template("edit.html", note=note)
 
 if __name__ == "__main__":
-    init_db()
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
